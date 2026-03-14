@@ -1,0 +1,118 @@
+--- SLICE 0 ---
+<|ref|>NAGANNA RAAJAA SILK INDUSTRIES
+
+15/4A.Radio Room Backside,Thottathusalai,Doddampalayam-638451
+
+Bhavanisagar Via,Sathyamangalam Tk.-638 451,Erode Dist.
+
+Cell:9629588189,9791769734
+
+GSTIN:33DCRPK0145Q1Z5
+
+TAXINVOICE
+
+STATE CODE:33
+
+To.
+
+KAVITHAS
+
+CREATIONS
+
+Invoice No
+
+153
+
+--- SLICE 1 ---
+<|ref|>GSTIN:3SEAZPK0810F12P
+
+Hand Delivery
+
+Vehicle No.
+
+--- SLICE 2 ---
+<|ref|>S.No.
+
+Name of Product
+
+HSN Code
+
+Qty
+
+Rate
+
+Amount
+
+Raw
+
+Silk
+
+5002
+
+6.332kg
+
+5460
+
+34,512
+
+E&OE
+
+*Hanloom Goods only
+
+TOTAL
+
+Rupees.Thirty.fow...thous.and...five
+
+Others
+
+hand.ced...D.Twelve...Rupees...Only
+
+CGST@
+
+%
+
+BANKDETAILS:
+
+SGST@
+
+%
+
+A/cName
+
+:NAGANNA RAAJAA SILKINDUSTRIES
+
+A/cNo
+
+120026402797
+
+IGST@
+
+%
+
+--- SLICE 3 ---
+<|ref|>Bank
+
+: CANARA BANK LTD.
+
+Tax Amount GST
+
+IFSC
+
+:CNRB0004377
+
+Branch
+
+: SATHYAMANGALAM
+
+GRAND TOTAL
+
+34512
+
+Terms & Conditions:
+
+For NAGANNA RAAJAA SILK INDUSTRIES
+
+Party Signatory
+
+Authorised Signatory
+
