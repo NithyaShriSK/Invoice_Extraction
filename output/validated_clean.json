@@ -1,0 +1,30 @@
+{
+  "Seller": "NAGANNA RAAJAA SILK INDUSTRIES",
+  "Buyer": "Sri Balaji Textiles",
+  "Seller_GSTIN": "33DCRPK0145Q1Z5",
+  "Buyer_GSTIN": "33FLWPM5155M1ZY",
+  "Invoice_No": "151",
+  "Invoice_Date": "14/11/0024",
+  "Bank Details": {
+    "A/cName": "NAGANNA RAAJAA SILK INDUSTRIES",
+    "A/cNo": "120026402797",
+    "Bank": "CANARABANKLTD.",
+    "IFSC": "CNRB0004377"
+  },
+  "Table Rows": [
+    {
+      "S.No": "1",
+      "Name of Product": "Silk",
+      "HSN Code": "6350",
+      "Qty": "2",
+      "Rate": "49.60",
+      "Amount": "99.20"
+    }
+  ],
+  "CGST_Percentage": null,
+  "SGST_Percentage": null,
+  "IGST_Percentage": null,
+  "Total_Amount": "99.20",
+  "Grand_Total": "99.20",
+  "Total Amount in Words": "Rupees Nine Thousand Nine Hundred Twenty Only"
+}

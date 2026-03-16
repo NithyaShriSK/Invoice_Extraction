@@ -12,7 +12,7 @@ import ollama
 from PIL import Image, ImageEnhance, ImageFilter
 
 
-def capture_model_infer(model, tokenizer, **kwargs):
+def capture_model_infer(model, tokenizer, echo_output=True, **kwargs):
     """
     model.infer() prints its OCR result to stdout and returns None.
     This wrapper captures that stdout, re-displays it, then returns
@@ -26,8 +26,9 @@ def capture_model_infer(model, tokenizer, **kwargs):
     finally:
         sys.stdout = old_stdout
     raw = buf.getvalue()
-    # Re-display model output so the terminal still shows progress
-    print(raw, end="")
+    # Re-display model output so the terminal still shows progress.
+    if echo_output:
+        print(raw, end="")
     # OCR text appears after the last '=====================' separator
     parts = raw.split("=====================")
     ocr_part = parts[-1] if len(parts) > 1 else raw
@@ -37,19 +38,25 @@ def preprocess_image(image_path, output_path="preprocessed_image.png", scale_fac
     """
     Comprehensive image preprocessing for OCR accuracy - Grayscale with high resolution
     """
+    # Read image
     img = cv2.imread(image_path)
+
     if img is None:
         raise ValueError(f"Could not read image: {image_path}")
+
     # Upscale image for higher resolution
     original_height, original_width = img.shape[:2]
     new_width = int(original_width * scale_factor)
     new_height = int(original_height * scale_factor)
     img_upscaled = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
     print(f"✓ Image upscaled from {original_width}x{original_height} to {new_width}x{new_height}")
+
     # Convert to grayscale
     gray = cv2.cvtColor(img_upscaled, cv2.COLOR_BGR2GRAY)
+
     # 1. Noise Reduction - Non-local Means Denoising
     denoised = cv2.fastNlMeansDenoising(gray, None, h=8, templateWindowSize=7, searchWindowSize=21)
+
     # 2. Deskew - Correct image rotation
     coords = np.column_stack(np.where(denoised > 0))
     if len(coords) > 0:
@@ -58,6 +65,7 @@ def preprocess_image(image_path, output_path="preprocessed_image.png", scale_fac
             angle = -(90 + angle)
         else:
             angle = -angle
+
         # Only deskew if rotation is significant
         if abs(angle) > 0.5:
             (h, w) = denoised.shape[:2]
@@ -65,210 +73,207 @@ def preprocess_image(image_path, output_path="preprocessed_image.png", scale_fac
             M = cv2.getRotationMatrix2D(center, angle, 1.0)
             denoised = cv2.warpAffine(denoised, M, (w, h),
                                       flags=cv2.INTER_CUBIC,
-
-
-
                                       borderMode=cv2.BORDER_REPLICATE)
 
-
-
-   
-
-
-
     # 3. Increase contrast using CLAHE (Contrast Limited Adaptive Histogram Equalization)
-
-
-
     clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
-
-
-
     contrast_enhanced = clahe.apply(denoised)
 
-
-
-   
-
-
-
     # 4. Morphological operations to remove noise (light operation)
-
-
-
     kernel = np.ones((1, 1), np.uint8)
-
-
-
     morphed = cv2.morphologyEx(contrast_enhanced, cv2.MORPH_CLOSE, kernel)
 
-
-
-   
-
-
-
     # Convert to PIL for additional enhancements - KEEP GRAYSCALE
-
-
-
     pil_img = Image.fromarray(morphed).convert('L')
 
-
-
-   
-
-
-
     # 5. Sharpen the image
-
-
-
     pil_img = pil_img.filter(ImageFilter.SHARPEN)
 
-
-
-   
-
-
-
     # 6. Enhance contrast
-
-
-
     enhancer = ImageEnhance.Contrast(pil_img)
-
-
-
     pil_img = enhancer.enhance(1.3)
 
-
-
-   
-
-
-
     # 7. Enhance brightness slightly
-
-
-
     enhancer = ImageEnhance.Brightness(pil_img)
-
-
-
     pil_img = enhancer.enhance(1.1)
 
-
-
-   
-
-
-
     # 8. Enhance sharpness
-
-
-
     enhancer = ImageEnhance.Sharpness(pil_img)
-
-
-
     pil_img = enhancer.enhance(1.5)
 
-
-
-   
-
-
-
     # Save preprocessed high-resolution grayscale image
-
-
-
     pil_img.save(output_path, quality=100, optimize=False)
-
-
-
     print(f"✓ Preprocessed grayscale image saved to: {output_path}")
-
-
-
-   
-
-
 
     return output_path
 
 
+def _find_row_gutters(binary_mask, min_gap=2):
+    """Find low-density horizontal gaps robustly using a projection histogram."""
+    if binary_mask is None or binary_mask.size == 0:
+        return np.array([], dtype=int)
+
+    row_sums = np.sum(binary_mask, axis=1).astype(np.float32)
+    smooth = np.convolve(row_sums, np.ones(9, dtype=np.float32) / 9.0, mode='same')
+    threshold = np.percentile(smooth, 20) * 0.6
+    low_mask = smooth <= threshold
+
+    centers = []
+    start = None
+    for i, is_low in enumerate(low_mask):
+        if is_low and start is None:
+            start = i
+        elif not is_low and start is not None:
+            if i - start >= min_gap:
+                centers.append((start + i - 1) // 2)
+            start = None
+
+    if start is not None and len(low_mask) - start >= min_gap:
+        centers.append((start + len(low_mask) - 1) // 2)
+
+    return np.array(centers, dtype=int)
 
 
 
-def get_smart_crops(image_path, num_slices=6):
-
-    """Slice on text gutters so cuts avoid splitting words."""
-
-    img = cv2.imread(image_path)
-
-    if img is None:
-
-        return []
 
 
+def split_tall_crop(crop, target_height):
 
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    """Split unusually tall crops at internal gutters to keep slice heights balanced."""
+
+    if crop is None or crop.shape[0] <= max(80, int(target_height * 1.35)):
+
+        return [crop] if crop is not None else []
+
+
+
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
 
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
+    crop_height, crop_width = crop.shape[:2]
 
-
-    row_sums = np.sum(binary, axis=1)
-
-    h, w = img.shape[:2]
+    gutters = _find_row_gutters(binary, min_gap=3)
 
 
 
-    gutters = np.where(row_sums < (np.mean(row_sums) * 0.1))[0]
+    if len(gutters) == 0:
+
+        midpoint = crop_height // 2
+
+        return [
+
+            sub_crop for sub_crop in [crop[:midpoint, 0:crop_width], crop[midpoint:crop_height, 0:crop_width]]
+
+            if sub_crop.shape[0] > 5
+
+        ]
 
 
+
+    split_count = max(2, int(round(crop_height / max(1, target_height))))
 
     cut_points = [0]
 
-    ideal_step = max(1, h // max(1, num_slices))
+    ideal_step = max(1, crop_height // split_count)
 
-    for i in range(1, num_slices):
+    min_gap = max(40, int(target_height * 0.4))
+
+
+
+    for i in range(1, split_count):
 
         target = i * ideal_step
 
-        if len(gutters) > 0:
+        nearest_index = int(np.abs(gutters - target).argmin())
 
-            closest_gutter = int(gutters[np.abs(gutters - target).argmin()])
+        split_at = int(gutters[nearest_index])
 
-        else:
+        if split_at - cut_points[-1] < min_gap:
 
-            closest_gutter = int(target)
+            continue
 
-        cut_points.append(closest_gutter)
-
-    cut_points.append(h)
+        cut_points.append(split_at)
 
 
 
-    cut_points = sorted(set(max(0, min(h, cp)) for cp in cut_points))
+    if crop_height - cut_points[-1] < min_gap and len(cut_points) > 1:
+
+        cut_points.pop()
 
 
 
-    crops = []
+    cut_points.append(crop_height)
+
+    cut_points = sorted(set(max(0, min(crop_height, cp)) for cp in cut_points))
+
+
+
+    split_crops = []
 
     for i in range(len(cut_points) - 1):
 
-        crop = img[cut_points[i]:cut_points[i + 1], 0:w]
+        sub_crop = crop[cut_points[i]:cut_points[i + 1], 0:crop_width]
 
-        if crop.shape[0] > 5:
+        if sub_crop.shape[0] > 5:
 
+            split_crops.append(sub_crop)
+
+
+
+    return split_crops if split_crops else [crop]
+
+
+
+
+def get_smart_crops(image_path, num_slices=4, overlap_px=70):
+    img = cv2.imread(image_path)
+    if img is None:
+        return []
+    h, w = img.shape[:2]
+
+    # 1. Focus on the center to ignore vertical border lines if possible
+    # Or just use the whole image but apply a horizontal morph
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+    # 2. MORPHOLOGY: Smear text horizontally to bridge gaps between words
+    # but NOT vertically. This helps identify distinct horizontal rows.
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (20, 1))
+    dilated = cv2.dilate(binary, kernel, iterations=2)
+
+    # 3. Calculate horizontal projection
+    row_sums = np.sum(dilated, axis=1)
+
+    # 4. Use a more robust threshold (e.g., mean of the bottom 10% of values)
+    # This handles images where "white" isn't perfectly zero.
+    low_values = np.sort(row_sums)[:int(len(row_sums) * 0.1)]
+    base_thresh = np.mean(low_values) if len(low_values) > 0 else 0
+    thresh = base_thresh + (np.max(row_sums) * 0.02)
+
+    gutters = np.where(row_sums <= thresh)[0]
+
+    # 5. Determine cut points (Logic remains similar but results will be better)
+    ideal_step = h // num_slices
+    actual_cut_points = [0]
+    for i in range(1, num_slices):
+        target = i * ideal_step
+        if len(gutters) > 0:
+            # Find gutter closest to target
+            closest_gutter = gutters[np.abs(gutters - target).argmin()]
+            actual_cut_points.append(int(closest_gutter))
+        else:
+            actual_cut_points.append(int(target))
+
+    actual_cut_points.append(h)
+
+    crops = []
+    for i in range(len(actual_cut_points) - 1):
+        start = max(0, actual_cut_points[i] - overlap_px)
+        end = min(h, actual_cut_points[i + 1] + overlap_px)
+        crop = img[start:end, 0:w]
+        if crop.shape[0] > 10:
             crops.append(crop)
-
-
-
-    print(f"Smart Sliced into {len(crops)} strips based on line spacing.")
 
     return crops
 
@@ -289,10 +294,71 @@ def clean_deepseek_output(raw_output):
     return text.strip()
 
 
+def normalize_ocr_text(text):
+    """Normalize OCR text by removing noisy spacing while preserving content."""
+    if not text:
+        return ""
+
+    normalized_lines = []
+    for raw_line in str(text).replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = raw_line.strip()
+        if not line:
+            if normalized_lines and normalized_lines[-1] != "":
+                normalized_lines.append("")
+            continue
+
+        line = re.sub(r'\s+', ' ', line)
+        line = re.sub(r'\s+([,.;:])', r'\1', line)
+        if "GSTIN" in line.upper():
+            line = re.sub(
+                r'(GSTIN\s*[:\-]?\s*)([A-Z0-9 ]{8,})',
+                lambda m: m.group(1) + re.sub(r'\s+', '', m.group(2).upper()),
+                line,
+                flags=re.IGNORECASE
+            )
+        normalized_lines.append(line)
+
+    return "\n".join(normalized_lines).strip()
+
+
+def _line_key(line):
+    """Canonical key for de-duplicating OCR lines across sliced/global sources."""
+    return re.sub(r'\W+', '', str(line).upper())
+
+
+def merge_sliced_with_global_fallback(sliced_text, global_text):
+    """Use global OCR lines only when sliced OCR is missing those lines."""
+    sliced = normalize_ocr_text(sliced_text)
+    global_ = normalize_ocr_text(global_text)
+
+    if not sliced:
+        return global_
+    if not global_:
+        return sliced
+
+    merged_lines = []
+    seen = set()
+
+    for line in sliced.splitlines():
+        key = _line_key(line)
+        if key and key not in seen:
+            seen.add(key)
+        merged_lines.append(line)
+
+    for line in global_.splitlines():
+        key = _line_key(line)
+        if not key or key in seen:
+            continue
+        merged_lines.append(line)
+        seen.add(key)
+
+    return "\n".join(merged_lines).strip()
 
 
 
-def smart_correct_invoice_from_file(file_path):
+
+
+def smart_correct_invoice_from_file(file_path, global_file_path=None):
 
 
 
@@ -314,31 +380,52 @@ def smart_correct_invoice_from_file(file_path):
 
         text_content = f.read()
 
+    text_content = normalize_ocr_text(text_content)
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(text_content)
+
 
 
     if not text_content.strip():
-
-
-
-        return json.dumps({"error": "File is empty"})
+        text_content = ""
 
 
 
 
 
 
+
+    global_text_content = ""
+
+    if global_file_path and os.path.exists(global_file_path):
+        with open(global_file_path, "r", encoding="utf-8") as f:
+            global_text_content = normalize_ocr_text(f.read())
+        with open(global_file_path, "w", encoding="utf-8") as f:
+            f.write(global_text_content)
+
+    llm_source_text = merge_sliced_with_global_fallback(text_content, global_text_content)
+    if not llm_source_text.strip():
+        return json.dumps({"error": "Both sliced and global OCR text are empty"})
+    llm_correct_path = os.path.join(os.path.dirname(file_path), "llm_correct.txt")
+    with open(llm_correct_path, "w", encoding="utf-8") as f:
+        f.write(llm_source_text)
 
     system_prompt = (
 
-        "You are an expert Invoice Parser. I will provide a text file containing Global OCR and Detailed Slices.\n"
+        "You are an expert Invoice Parser. I will provide slice-level OCR text from an invoice.\n"
 
         "RULES:\n"
 
         "1. MATH: Calculate Qty * Rate. Trust the math and 'Rupees in words' over raw OCR numbers if they conflict.\n"
 
-        "2. GST: Indian GSTINs start with state codes (e.g., 33 for Tamil Nadu). Fix OCR typos in GSTINs.\n"
+        "2. GST: Copy the GSTIN string EXACTLY as it appears in the OCR text. Do NOT rearrange, reconstruct, or guess characters. Post-processing code will fix character-class errors.\n"
 
-        "3. STRUCTURE: Extract Seller, Buyer, GSTINs, Bank Details, and Table Rows.\n"
+        "3. STRUCTURE: Extract Seller, Buyer, Seller_GSTIN, Buyer_GSTIN, Invoice_No, Invoice_Date, Bank Details, and Table Rows.\n"
+
+        "4. DATE: Look for dates near the Invoice Number. Output as Invoice_Date in DD/MM/YYYY format or as found.\n"
+
+        "5. AMOUNTS: Output every currency amount as a numeric string with two decimals (example: 28041.00). If OCR shows 28.041 and context indicates thousands, treat it as 28041.00.\n"
 
         "RETURN ONLY JSON."
 
@@ -357,10 +444,13 @@ def smart_correct_invoice_from_file(file_path):
 
 
 
+        llm_prompt = (
+            "PROCESS THIS OCR TEXT FILE CONTENT.\n"
+            "Primary source is sliced OCR, and missing content has been filled from global OCR.\n\n"
+            f"MERGED OCR (sliced + global fallback):\n{llm_source_text}"
+        )
+
         response = ollama.generate(
-
-
-
             model='qwen2.5:7b',
 
 
@@ -369,7 +459,7 @@ def smart_correct_invoice_from_file(file_path):
 
 
 
-            prompt=f"PROCESS THIS OCR TEXT FILE CONTENT:\n{text_content}",
+            prompt=llm_prompt,
 
 
 
@@ -450,6 +540,400 @@ def parse_numeric_value(value):
 
 
     return float(cleaned_value)
+
+
+def _canonical_date_token(token):
+
+    if not token:
+
+        return None
+
+    m = re.search(r'(?<!\d)(\d{1,2})\s*[./-]\s*(\d{1,2})\s*[./-]\s*(\d{2,4})(?!\d)', str(token))
+
+    if not m:
+
+        return None
+
+    day = int(m.group(1))
+
+    month = int(m.group(2))
+
+    if day < 1 or day > 31 or month < 1 or month > 12:
+
+        return None
+
+    year = m.group(3)
+
+    if len(year) == 2:
+
+        year = f"20{year}"
+
+    return f"{day:02d}/{month:02d}/{year.zfill(4)}"
+
+
+def _extract_date_candidates(text):
+
+    if not text:
+
+        return []
+
+    raw = [m.group(0) for m in re.finditer(r'(?<!\d)\d{1,2}\s*[./-]\s*\d{1,2}\s*[./-]\s*\d{2,4}(?!\d)', text)]
+
+    seen = set()
+
+    ordered = []
+
+    for token in raw:
+
+        canon = _canonical_date_token(token)
+
+        if canon and canon not in seen:
+
+            seen.add(canon)
+
+            ordered.append(canon)
+
+    return ordered
+
+
+def infer_state_code_from_ocr(text):
+    """Infer GST state code from OCR text using labels or GSTIN prefixes."""
+    if not text:
+        return None
+
+    digit_map = {'S': '5', 'O': '0', 'I': '1', 'B': '8', 'G': '6', 'Z': '2'}
+
+    def _norm(token):
+        cleaned = ''.join(digit_map.get(ch, ch) for ch in re.sub(r'[^A-Z0-9]', '', str(token).upper()))
+        return cleaned if re.fullmatch(r'\d{2}', cleaned) else None
+
+    labeled = re.search(r'STATE\s*CODE\s*[:\-]?\s*([A-Z0-9]{1,3})', str(text).upper())
+    if labeled:
+        state = _norm(labeled.group(1))
+        if state:
+            return state
+
+    for m in re.finditer(r'\b([0-9SOIZBG]{2})[A-Z0-9]{13}\b', str(text).upper()):
+        state = _norm(m.group(1))
+        if state:
+            return state
+
+    return None
+
+
+def enforce_invoice_date_from_ocr(data, sliced_text, global_text=None):
+
+    """
+
+    Keep Invoice_Date grounded in OCR text.
+    Rule:
+    1) Use sliced OCR date if available.
+    2) If sliced OCR has no date, fallback to global OCR date.
+    3) If OCR has no date at all, keep a valid LLM date as weak fallback.
+
+    """
+
+    if not isinstance(data, dict):
+
+        return data
+
+    sliced_dates = _extract_date_candidates(sliced_text)
+
+    global_dates = _extract_date_candidates(global_text)
+
+    llm_date = str(data.get("Invoice_Date", "")).strip()
+
+    llm_canon = _canonical_date_token(llm_date)
+
+    if sliced_dates:
+
+        if llm_canon in sliced_dates:
+
+            data["Invoice_Date"] = llm_canon
+
+            data["Invoice_Date_Source"] = "sliced"
+
+            return data
+
+        data["Invoice_Date"] = sliced_dates[0]
+
+        data["Invoice_Date_Source"] = "sliced"
+
+        if llm_date and llm_canon not in sliced_dates:
+
+            data["Invoice_Date_Note"] = f"LLM date '{llm_date}' not found in sliced OCR; replaced with sliced OCR date"
+
+        return data
+
+    if global_dates:
+
+        if llm_canon in global_dates:
+
+            data["Invoice_Date"] = llm_canon
+
+        else:
+
+            data["Invoice_Date"] = global_dates[0]
+
+            if llm_date:
+
+                data["Invoice_Date_Note"] = f"LLM date '{llm_date}' not found in sliced/global OCR; replaced with global OCR date"
+
+        data["Invoice_Date_Source"] = "global"
+
+        return data
+
+    # No date in either OCR source: keep valid LLM date as weak fallback.
+    if llm_canon:
+
+        data["Invoice_Date"] = llm_canon
+
+        data["Invoice_Date_Source"] = "llm_weak"
+
+        data["Invoice_Date_Note"] = f"No OCR date found; kept LLM date '{llm_date}' as weak fallback"
+
+        return data
+
+    if llm_date:
+
+        data["Invoice_Date_Note"] = f"LLM date '{llm_date}' removed because no OCR date was found"
+
+    data["Invoice_Date"] = ""
+
+    data["Invoice_Date_Source"] = "none"
+
+    return data
+
+
+def fill_missing_buyer_gstin(data, sliced_text, voted_gst=None, state_code=None):
+
+    """
+
+    Fill Buyer_GSTIN when LLM misses it.
+    Priority:
+    1) voted_gst from ensemble slices
+    2) GSTIN-like values parsed from sliced OCR text
+
+    """
+
+    if not isinstance(data, dict):
+
+        return data
+
+    existing = str(data.get("Buyer_GSTIN", "")).strip()
+
+    if existing:
+
+        return data
+
+    seller = str(data.get("Seller_GSTIN", "")).strip().upper()
+
+    # 1) Use voted GST from ensemble if available
+    if voted_gst:
+
+        voted_corrected = correct_gstin(voted_gst, force_state_code=state_code)
+
+        if voted_corrected and voted_corrected != seller:
+
+            data["Buyer_GSTIN"] = voted_corrected
+
+            data["Buyer_GSTIN_Source"] = "voted"
+
+            return data
+
+    # 2) Parse GSTIN-like tokens near GSTIN labels from sliced text
+    if not sliced_text:
+
+        return data
+
+    candidates = []
+
+    for line in sliced_text.splitlines():
+
+        upper_line = line.upper()
+
+        if "GSTIN" not in upper_line:
+
+            continue
+
+        # Capture token after GSTIN: and also whole line as fallback
+        right = upper_line.split("GSTIN", 1)[-1]
+
+        for chunk in [right, upper_line]:
+
+            token = re.sub(r'[^A-Z0-9]', '', chunk)
+
+            if len(token) < 12:
+
+                continue
+
+            # Keep 15-char window if token is longer
+            if len(token) > 15:
+
+                token = token[-15:]
+
+            repaired = universal_gstin_repair(token)
+
+            corrected = correct_gstin(repaired if repaired else token, force_state_code=state_code)
+
+            if corrected and len(corrected) == 15:
+
+                candidates.append(corrected)
+
+    # Choose first non-seller candidate
+    for gst in candidates:
+
+        if gst != seller:
+
+            data["Buyer_GSTIN"] = gst
+
+            data["Buyer_GSTIN_Source"] = "sliced"
+
+            return data
+
+    return data
+
+
+def _cleanup_words_text(text):
+
+    if not text:
+
+        return ""
+
+    cleaned = re.sub(r'[._]+', ' ', str(text))
+
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+    return cleaned
+
+
+def _number_to_words_under_1000(n):
+
+    ones = [
+        "", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine",
+        "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen",
+        "Seventeen", "Eighteen", "Nineteen"
+    ]
+
+    tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"]
+
+    if n == 0:
+
+        return ""
+
+    if n < 20:
+
+        return ones[n]
+
+    if n < 100:
+
+        return (tens[n // 10] + (" " + ones[n % 10] if n % 10 else "")).strip()
+
+    return (ones[n // 100] + " Hundred" + (" " + _number_to_words_under_1000(n % 100) if n % 100 else "")).strip()
+
+
+def number_to_words_indian(n):
+
+    if n == 0:
+
+        return "Zero"
+
+    parts = []
+
+    crore = n // 10000000
+
+    n %= 10000000
+
+    lakh = n // 100000
+
+    n %= 100000
+
+    thousand = n // 1000
+
+    n %= 1000
+
+    hundred_part = n
+
+    if crore:
+
+        parts.append(f"{_number_to_words_under_1000(crore)} Crore")
+
+    if lakh:
+
+        parts.append(f"{_number_to_words_under_1000(lakh)} Lakh")
+
+    if thousand:
+
+        parts.append(f"{_number_to_words_under_1000(thousand)} Thousand")
+
+    if hundred_part:
+
+        parts.append(_number_to_words_under_1000(hundred_part))
+
+    return " ".join(part for part in parts if part).strip()
+
+
+def extract_total_amount_number(data):
+
+    keys = ["Grand_Total", "Total Amount", "Total_Amount", "Tax Amount GST", "Amount"]
+
+    for key in keys:
+
+        val = data.get(key)
+
+        if val is None:
+
+            continue
+
+        digits = re.sub(r'[^\d]', '', str(val))
+
+        if digits:
+
+            return int(digits)
+
+    # Fallback: sum table/product amounts if available
+    total = 0
+
+    found = False
+
+    for row in data.get("Table Rows", []) + data.get("Products", []):
+
+        amt = row.get("Amount") if isinstance(row, dict) else None
+
+        digits = re.sub(r'[^\d]', '', str(amt)) if amt is not None else ""
+
+        if digits:
+
+            total += int(digits)
+
+            found = True
+
+    return total if found else None
+
+
+def prepare_export_json(data):
+
+    export_data = dict(data)
+
+    remove_keys = {"GSTIN", "Invoice_Date_Note", "Invoice_Date_Source", "Products"}
+
+    for key in remove_keys:
+
+        export_data.pop(key, None)
+
+    total_num = extract_total_amount_number(export_data)
+
+    if total_num is not None:
+
+        export_data["Total Amount in Words"] = f"Rupees {number_to_words_indian(total_num)} Only"
+
+    else:
+
+        current_words = export_data.get("Total Amount in Words", "")
+
+        export_data["Total Amount in Words"] = _cleanup_words_text(current_words)
+
+    return export_data
 
 
 
@@ -653,7 +1137,7 @@ def universal_gstin_repair(gst_str):
 
 
 
-def correct_gstin(gst, force_state_code="33"):
+def correct_gstin(gst, force_state_code=None):
 
 
 
@@ -717,14 +1201,6 @@ def correct_gstin(gst, force_state_code="33"):
 
 
     state = ''.join(digit_map.get(ch, ch) for ch in token[0:2])
-
-
-
-    if state in {'53', 'S3'}:
-
-
-
-        state = '33'
 
 
 
@@ -844,7 +1320,7 @@ def correct_gstin(gst, force_state_code="33"):
 
 
 
-def find_best_gstin_ensemble(all_text_list):
+def find_best_gstin_ensemble(all_text_list, preferred_state_code=None):
 
 
 
@@ -863,7 +1339,7 @@ def find_best_gstin_ensemble(all_text_list):
 
 
 
-    gst_pattern = r'33[A-Z0-9]{10,13}'
+    gst_pattern = r'\b[0-9SOIZBG]{2}[A-Z0-9]{10,13}\b'
 
 
 
@@ -955,7 +1431,7 @@ def find_best_gstin_ensemble(all_text_list):
 
 
 
-    return correct_gstin(best_gst)
+    return correct_gstin(best_gst, force_state_code=preferred_state_code)
 
 
 
@@ -963,7 +1439,7 @@ def find_best_gstin_ensemble(all_text_list):
 
 
 
-def final_cleanup(data):
+def final_cleanup(data, state_code=None):
 
 
 
@@ -995,7 +1471,7 @@ def final_cleanup(data):
 
 
 
-        corrected = correct_gstin(repaired if repaired else str(val), force_state_code="33")
+        corrected = correct_gstin(repaired if repaired else str(val), force_state_code=state_code)
 
 
 
@@ -1378,10 +1854,14 @@ print("=== Starting Smart Slice OCR ===")
 
 
 # Pass 1: Global View for layout context.
+global_txt_path = os.path.join(output_path, "global.txt")
+global_ocr_path = os.path.join(output_path, "global_ocr.txt")
 
 global_text_raw = capture_model_infer(
 
     model, tokenizer,
+
+    echo_output=False,
 
     prompt=prompt,
 
@@ -1399,13 +1879,21 @@ global_text_raw = capture_model_infer(
 
 )
 
-global_text = clean_deepseek_output(global_text_raw)
+global_text = normalize_ocr_text(clean_deepseek_output(global_text_raw))
+
+with open(global_txt_path, "w", encoding="utf-8") as f:
+    f.write(global_text)
+
+with open(global_ocr_path, "w", encoding="utf-8") as f:
+    f.write(global_text)
+
+print(f"=== Global OCR saved to: {global_txt_path} ===")
 
 
 
 # Pass 2: Detail View from smart slices.
-
-crops = get_smart_crops(preprocessed_image)
+target_slices = 4
+crops = get_smart_crops(preprocessed_image, num_slices=target_slices, overlap_px=70)
 
 ocr_outputs = []
 
@@ -1448,15 +1936,15 @@ with open(ocr_storage_path, "w", encoding="utf-8") as f:
 
 
         raw_res = str(res).strip()
-        clean_res = clean_deepseek_output(raw_res)
+        clean_res = normalize_ocr_text(clean_deepseek_output(raw_res))
 
 
 
-        if len(raw_res) > 5:
+        if len(clean_res) > 5:
 
             # Save to file immediately
 
-            f.write(f"--- SLICE {i} ---\n{raw_res}\n\n")
+            f.write(f"--- SLICE {i} ---\n{clean_res}\n\n")
 
             ocr_outputs.append(clean_res)
 
@@ -1476,7 +1964,12 @@ if not global_text and not ocr_outputs:
 
 
 
-voted_gst = find_best_gstin_ensemble(ocr_outputs) if ocr_outputs else None
+state_code_hint = infer_state_code_from_ocr("\n".join(ocr_outputs + [global_text]))
+voted_gst = find_best_gstin_ensemble(ocr_outputs, preferred_state_code=state_code_hint) if ocr_outputs else None
+
+if state_code_hint:
+
+    print(f"Inferred state code from OCR: {state_code_hint}")
 
 
 
@@ -1518,7 +2011,10 @@ if os.path.exists(ocr_storage_path):
 
 
 
-        llm_json_str = smart_correct_invoice_from_file(ocr_storage_path)
+        llm_json_str = smart_correct_invoice_from_file(
+            ocr_storage_path,
+            global_txt_path if os.path.exists(global_txt_path) else None
+        )
 
 
 
@@ -1536,6 +2032,44 @@ if os.path.exists(ocr_storage_path):
 
         llm_data = json.loads(llm_json_str)
 
+        sliced_text_for_validation = ""
+
+        global_text_for_validation = ""
+
+        if os.path.exists(ocr_storage_path):
+
+            with open(ocr_storage_path, "r", encoding="utf-8") as f:
+
+                sliced_text_for_validation = f.read()
+
+        if os.path.exists(global_txt_path):
+
+            with open(global_txt_path, "r", encoding="utf-8") as f:
+
+                global_text_for_validation = f.read()
+
+        llm_data = enforce_invoice_date_from_ocr(
+
+            llm_data,
+
+            sliced_text=sliced_text_for_validation,
+
+            global_text=global_text_for_validation
+
+        )
+
+        llm_data = fill_missing_buyer_gstin(
+
+            llm_data,
+
+            sliced_text=sliced_text_for_validation,
+
+            voted_gst=voted_gst,
+
+            state_code=state_code_hint
+
+        )
+
 
 
 
@@ -1546,7 +2080,7 @@ if os.path.exists(ocr_storage_path):
 
 
 
-        cleaned_data = final_cleanup(llm_data)
+        cleaned_data = final_cleanup(llm_data, state_code=state_code_hint)
 
         cleaned_data['Products'] = dynamic_math_audit(cleaned_data.get('Products', []))
 
@@ -1581,6 +2115,20 @@ if os.path.exists(ocr_storage_path):
 
 
         print(json.dumps(final_data, indent=2, ensure_ascii=False))
+
+        export_data = prepare_export_json(final_data)
+
+        export_json_path = os.path.join(output_path, "validated_clean.json")
+
+        with open(export_json_path, "w", encoding="utf-8") as f:
+
+            json.dump(export_data, f, indent=2, ensure_ascii=False)
+
+        print("\n=== EXPORTED CLEAN JSON DATA ===\n")
+
+        print(json.dumps(export_data, indent=2, ensure_ascii=False))
+
+        print(f"\nClean JSON saved to: {export_json_path}")
 
 
 
