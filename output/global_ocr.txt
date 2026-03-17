@@ -1,128 +1,124 @@
-NAGANNA RAJAA SILK INDUSTRIES
+NAGANNA RAAJAA SILK INDUSTRIES
 
-15/4A,Radio Room Backside,Thoothatusalati,Dooddampalayam-638451
+154/A,Radio Room Backside,Thottalurattai, Doddampattayam-634541
 
-Bhavanagarajana.rajaa.silk.industry@gmail.com
+Bhavanagariva, Vai, Sathyamangalam Tk., 638 451, Errode Dist.
 
-Cell:9629588189,9791769734
+Cell:96295 68189,9791769734
 
-GSTIN:33DCRPK014SQIZS
+GSTIN:33CDRCPK014501285
 
 TAXINVOICE
 
-STATECODE:33
+STATE CODE:33
 
-To
+To.
 
-Sri
+KAVITHAS
 
-Balaji
-
-Texte
+CREATIONS
 
 Invoice No.
 
-151
+154
 
-21.Doddampalayam (CR)
+ANTHYRO
+
+D36153
 
 Invoice Date
 
-14.11.2024
+:27.11.2024
 
-Bhavanagaraja
+E-way Bill No.
 
-C.Va.638451
+Transportation Mode:
 
-E-way Bill No
+GSTIN
 
-Erode co.01
+E2PK0815F12
 
-Transportation Mode
-
-Hand Delivery
-
-GSTIN:33F1LWPMS15A2A
-
-Venice No.
+Vehicle No.
 
 S.No.
 
 Name of Product
 
-HSM Code
+HSN Code
 
 Qty
 
-Ratio
+Rate
 
 Amount
 
-Pair
+Raut
 
-Silk
+stik
 
-SOP2
+GSOA
 
-6.350
+ID-1B-1B
 
-4960
+G550
 
-31.496
+59,047
 
 E&OE
 
-*Hanoom Goods only
+*Hanlcom Goods only
 
 TOTAL
 
-31.496
+Sq.047
+
+Others
 
 Rupees
 
-Thirty
+Fifty
 
-One
+Nim
 
-Thousand
+Thottai
 
-Rupees
+Nimly
 
-Hundred
+Hail
 
-Ninety
+Savel
 
-Six
-
-Hundred
+Rupees Only
 
 CGST@
 
 %
 
-BANKDETAILS:
+BANK DETAIL:
 
-SGS
-
-%
-
-Ace Name
-
-NAGANNA RAJAA SILK INDUSTRIES
-
-IGST
+SGST@
 
 %
 
-Ace No
+A/c Name
 
-126024297
+NAGANNA RAAJAA SILK INDUSTRIES
+
+IGST@
+
+%
+
+A/c No
+
+120026402797
+
+Tax Amount GST
 
 IFSC
 
-CNRB0004377
+CNR00004377
 
-Tax Amount GST
+CNR00004377
 
 Branch
 
@@ -130,10 +126,10 @@ SATHYAMANGALAM
 
 GRAND TOTAL
 
-Terms&Conditions
+Sq.047
 
-For RAGANNA RAJAA SILK INDUSTRIES
+Terms &Conditions:
 
-K.B.Gamabay
+For NAGANNA RAAJAA SILK INDUSTRIES
 
-Authorised Signatory
+K.4.6.6.6.6.6.6.6.6.6.6.

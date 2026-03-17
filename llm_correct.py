@@ -25,21 +25,148 @@ def parse_numeric_value(value):
         return None
 
 
+def parse_amount_like_value(value):
+    """Parse amount-like OCR tokens, including dot-separated thousands."""
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    cleaned = re.sub(r'[^\d.,]', '', text)
+    if not cleaned:
+        return None
+
+    if cleaned.count('.') > 1:
+        digits = re.sub(r'\D', '', cleaned)
+        return float(digits) if digits else None
+
+    if ',' not in cleaned and re.fullmatch(r'\d{1,3}\.\d{3}', cleaned):
+        return float(cleaned.replace('.', ''))
+
+    normalized = cleaned.replace(',', '')
+    try:
+        return float(normalized)
+    except ValueError:
+        digits = re.sub(r'\D', '', normalized)
+        return float(digits) if digits else None
+
+
+def format_amount_for_export(value):
+    parsed = parse_amount_like_value(value)
+    if parsed is None:
+        return ""
+    if float(parsed).is_integer():
+        return f"{int(parsed):,}"
+    return f"{parsed:,.2f}"
+
+
+def normalize_numeric_ocr_field(value, keep_decimal=True):
+    """Correct common OCR substitutions without deriving values from other fields."""
+    if value is None:
+        return ""
+
+    text = str(value).strip().upper()
+    if not text:
+        return ""
+
+    char_map = {
+        'O': '0',
+        'D': '0',
+        'I': '1',
+        'L': '1',
+        'S': '5',
+        'Z': '2',
+        'G': '6',
+        'B': '6',
+    }
+    allowed = '0123456789.,' if keep_decimal else '0123456789'
+    normalized = []
+    for char in text:
+        mapped = char_map.get(char, char)
+        if mapped in allowed:
+            normalized.append(mapped)
+    return ''.join(normalized)
+
+
+def repair_hsn_code(value):
+    """Repair common OCR substitutions in HSN values."""
+    if value is None:
+        return ""
+
+    raw = re.sub(r'[^A-Z0-9]', '', str(value).upper())
+    if not raw:
+        return ""
+
+    hsn_map = {'S': '5', 'O': '0', 'D': '0', 'I': '1', 'Z': '2', 'G': '6', 'B': '6', 'L': '1'}
+    repaired = ''.join(hsn_map.get(char, char) for char in raw)
+    if repaired.isdigit() and len(repaired) in (4, 6, 8):
+        return repaired
+    return repaired if repaired.isdigit() else raw
+
+
+def normalize_export_date(value):
+    if value is None:
+        return ""
+
+    text = str(value).strip()
+    if not text:
+        return ""
+
+    text = text.replace('0024', '2024')
+    match = re.search(r'(\d{1,2})\s*[./-]\s*(\d{1,2})\s*[./-]\s*(\d{2,4})', text)
+    if not match:
+        return text
+
+    day = int(match.group(1))
+    month = int(match.group(2))
+    year = match.group(3)
+    if year == '24':
+        year = '2024'
+    elif len(year) == 2:
+        year = f'20{year}'
+    elif year == '0024':
+        year = '2024'
+
+    return f"{day:02d}/{month:02d}/{year}"
+
+
+def clean_invoice_number(value):
+    """Extract the main invoice number, removing subsidiary parts like /MM/YYYY.
+    
+    E.g., "153/11/2024" -> "153"
+    """
+    if value is None:
+        return ""
+    
+    text = str(value).strip()
+    if not text:
+        return ""
+    
+    # If the invoice number contains a "/" (subsidiary format like 153/11/2024),
+    # extract just the first part (153)
+    if "/" in text:
+        main_part = text.split("/")[0].strip()
+        return main_part
+    
+    return text
+
+
 def dynamic_math_audit(product_list):
-    """Flag / fix Qty*Rate mismatches in any product list."""
+    """Preserve OCR field values and apply only field-local text correction."""
     audited = []
     for item in product_list:
-        try:
-            qty     = float(re.sub(r'[^\d.]', '', str(item.get('Quantity', item.get('Qty', 0)))))
-            rate    = float(re.sub(r'[^\d.]', '', str(item.get('Rate', 0))))
-            claimed = float(re.sub(r'[^\d.]', '', str(item.get('Amount', 0))))
-            actual  = round(qty * rate, 2)
-            if abs(actual - claimed) > (actual * 0.05):
-                item['Validation_Warning'] = f"OCR says {claimed}, math (Qty*Rate) suggests {actual}"
-                item['Amount'] = actual
-        except Exception:
-            pass
-        audited.append(item)
+        if not isinstance(item, dict):
+            continue
+        normalized_item = dict(item)
+        normalized_item['HSN_Code'] = repair_hsn_code(normalized_item.get('HSN_Code', ''))
+        normalized_item['Qty'] = normalize_numeric_ocr_field(
+            normalized_item.get('Quantity', normalized_item.get('Qty', ''))
+        )
+        normalized_item['Rate'] = normalize_numeric_ocr_field(normalized_item.get('Rate', ''))
+        normalized_item['Amount'] = normalize_numeric_ocr_field(normalized_item.get('Amount', ''))
+        audited.append(normalized_item)
     return audited
 
 
@@ -186,6 +313,45 @@ def fix_gstins_in_data(data: dict) -> dict:
             print(f"  [GSTIN OK] {key}: {corrected}")
     return data
 
+
+def final_data_repair(data):
+    """Programmatic correction for HSN, Date, and Field mapping."""
+
+    # 1. Force Year Correction (0024 -> 2024)
+    if 'Invoice_Date' in data and '0024' in str(data['Invoice_Date']):
+        data['Invoice_Date'] = str(data['Invoice_Date']).replace('0024', '2024')
+
+    # 2. Repair Products (HSN & Taxes)
+    if 'Products' in data:
+        for item in data['Products']:
+            if not isinstance(item, dict):
+                continue
+
+            item['HSN_Code'] = repair_hsn_code(item.get('HSN_Code', ''))
+
+            # Normalize percent/rate field names so export stays consistent.
+            if not item.get('CGST_Percent') and item.get('CGST_Rate') is not None:
+                item['CGST_Percent'] = item.get('CGST_Rate', '')
+            if not item.get('SGST_Percent') and item.get('SGST_Rate') is not None:
+                item['SGST_Percent'] = item.get('SGST_Rate', '')
+            if not item.get('IGST_Percent') and item.get('IGST_Rate') is not None:
+                item['IGST_Percent'] = item.get('IGST_Rate', '')
+
+            for required_key in [
+                'S_No', 'Name_of_Product', 'HSN_Code', 'Qty', 'Rate',
+                'CGST_Percent', 'SGST_Percent', 'IGST_Percent', 'Amount'
+            ]:
+                if required_key not in item or item[required_key] is None:
+                    item[required_key] = ""
+
+    if not data.get('Seller_Name') and data.get('Seller') is not None:
+        data['Seller_Name'] = data.get('Seller', '')
+    if not data.get('Buyer_Name') and data.get('Buyer') is not None:
+        data['Buyer_Name'] = data.get('Buyer', '')
+    if not data.get('Grand_Total') and data.get('Amount') is not None:
+        data['Grand_Total'] = data.get('Amount', '')
+    return data
+
 # Fields that must be present and non-empty for the sliced result to be considered complete
 REQUIRED_FIELDS = ['Invoice_Date', 'Invoice_No', 'Seller', 'Buyer', 'Seller_GSTIN', 'Buyer_GSTIN']
 
@@ -280,10 +446,10 @@ def main():
     base_system = (
         "You are an expert Invoice Parser.\n"
         "RULES:\n"
-        "1. MATH: Calculate Qty * Rate. Trust the math and 'Rupees in words' over raw OCR numbers if they conflict.\n"
+        "1. FIELD PRESERVATION: Copy Qty, Rate, Amount, and Grand_Total from their own OCR fields. Do NOT calculate or derive Amount from Qty * Rate.\n"
         "2. GST: Copy the GSTIN string EXACTLY as it appears in the OCR text. Do NOT rearrange, reconstruct, or guess characters.\n"
         "   Post-processing code will fix character-class errors (e.g. S<->3, O<->0, Z at position 14).\n"
-        "3. STRUCTURE: Extract Seller, Buyer, Seller_GSTIN, Buyer_GSTIN, Invoice_No, Invoice_Date, Bank Details, and Table Rows.\n"
+        "3. STRUCTURE: Extract Seller, Buyer, Seller_GSTIN, Buyer_GSTIN, Invoice_No, Invoice_Date, Bank Details, and Table Rows. Keep each value in its field.\n"
         "4. DATE: Look for dates near the Invoice Number. Output as Invoice_Date in DD/MM/YYYY format or as found.\n"
         "5. PUNCTUATION: When OCR uses '.' as a thousands separator in amount-like values (example: 28.041), normalize it to ',' (28,041). Keep true decimal values unchanged.\n"
         "RETURN ONLY JSON."
@@ -352,19 +518,51 @@ def main():
         print("\n[INFO] All required fields present in sliced.txt output — global OCR not needed.")
 
     # ── Post-processing ───────────────────────────────────────────────────────
-    data['Products'] = dynamic_math_audit(data.get('Products', []))
+    data['Products'] = data.get('Products', [])
     data = validate_json_data(data)
 
     print("\n=== GSTIN VALIDATION ===")
     data = fix_gstins_in_data(data)
 
-    print("\n=== CORRECTED & VALIDATED JSON ===")
-    pretty = json.dumps(data, indent=2, ensure_ascii=False)
+    # 1. Apply the fixes
+    data = final_data_repair(data)
+
+    # 2. Force the final structure for Export
+    normalized_products = []
+    for item in data.get("Products", []):
+        if not isinstance(item, dict):
+            continue
+        normalized_products.append({
+            "S_No": item.get("S_No", ""),
+            "Name_of_Product": item.get("Name_of_Product") or item.get("ProductName") or "",
+            "HSN_Code": item.get("HSN_Code", ""),
+            "Qty": item.get("Qty") or item.get("Quantity") or "",
+            "Rate": item.get("Rate", ""),
+            "CGST_Percent": item.get("CGST_Percent") or item.get("CGST_Rate") or "",
+            "SGST_Percent": item.get("SGST_Percent") or item.get("SGST_Rate") or "",
+            "IGST_Percent": item.get("IGST_Percent") or item.get("IGST_Rate") or "",
+            "Amount": item.get("Amount", "")
+        })
+
+    final_json = {
+        "Seller_Name": data.get("Seller_Name") or data.get("Seller") or "",
+        "Seller_GSTIN": data.get("Seller_GSTIN") or "",
+        "Buyer_Name": data.get("Buyer_Name") or data.get("Buyer") or "",
+        "Buyer_GSTIN": data.get("Buyer_GSTIN") or "",
+        "Invoice_No": clean_invoice_number(data.get("Invoice_No")),
+        "Invoice_Date": normalize_export_date(data.get("Invoice_Date")),
+        "Products": normalized_products,
+        "Grand_Total": normalize_numeric_ocr_field(data.get("Grand_Total") or data.get("Amount") or "")
+    }
+
+    print("\n=== FINAL EXPORTED JSON ===")
+    pretty = json.dumps(final_json, indent=2, ensure_ascii=False)
     print(pretty)
 
-    with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
+    # Save to validated_clean.json
+    output_path = os.path.join("output", "validated_clean.json")
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write(pretty)
-    print(f"\nOutput saved to {OUTPUT_JSON}")
 
 
 if __name__ == "__main__":
