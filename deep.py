@@ -1035,7 +1035,10 @@ def normalize_export_date(value):
 
 def resolve_runtime_paths():
     """Allow running the pipeline against arbitrary images/output folders."""
-    image_path = sys.argv[1] if len(sys.argv) > 1 else "invoice1.png"
+    if len(sys.argv) < 2:
+        raise ValueError("Input image path is required")
+
+    image_path = sys.argv[1]
     output_dir = sys.argv[2] if len(sys.argv) > 2 else "./output"
     return image_path, output_dir
 
