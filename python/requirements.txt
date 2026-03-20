@@ -1,0 +1,29 @@
+# OCR and ML dependencies
+Pillow>=9.0.0
+opencv-python>=4.5.0
+numpy<1.25.0
+requests>=2.28.0
+python-dotenv>=0.19.0
+
+# DeepSeek OCR2 (placeholder - replace with actual package when available)
+# deepseek-ocr2>=1.0.0
+
+# Text processing
+regex>=2022.0.0
+nltk>=3.7
+# spacy>=3.4.0  # Install via conda instead - use: conda install -c conda-forge spacy
+
+# JSON handling
+ujson>=5.0.0
+
+# Image processing
+scikit-image>=0.19.0
+
+# OCR/LLM runtime used by deep.py and llm_correct.py
+transformers>=4.40.0
+torch>=2.2.0
+ollama>=0.3.0
+
+# Optional: GPU acceleration
+# torch>=1.11.0
+# torchvision>=0.12.0
