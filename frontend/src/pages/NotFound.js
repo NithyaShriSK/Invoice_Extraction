@@ -4,10 +4,10 @@ import { Home, FileText, Search } from 'lucide-react';
 
 const NotFound = () => {
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gray-100 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <div className="text-center">
-          <div className="mx-auto h-24 w-24 text-blue-600">
+          <div className="mx-auto h-24 w-24 text-indigo-600">
             <Search className="h-full w-full" />
           </div>
           <h1 className="mt-6 text-4xl font-bold text-gray-900">404</h1>
@@ -26,7 +26,7 @@ const NotFound = () => {
           </div>
           <div className="mt-4">
             <Link
-              to="/history"
+              to="/invoices"
               className="btn btn-outline"
             >
               <FileText className="h-4 w-4 mr-2" />

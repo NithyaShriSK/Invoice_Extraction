@@ -1,15 +1,16 @@
 import React from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
-import Layout from './components/Layout';
-import PrivateRoute from './components/PrivateRoute';
+import AppLayout from './components/layout/AppLayout';
+import ProtectedRoute from './components/ProtectedRoute';
 import AdminRoute from './components/AdminRoute';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Dashboard from './pages/Dashboard';
-import History from './pages/History';
+import Upload from './pages/Upload';
+import Invoices from './pages/Invoices';
 import InvoiceDetail from './pages/InvoiceDetail';
 import Profile from './pages/Profile';
-import AdminDashboard from './pages/AdminDashboard';
+import Admin from './pages/Admin';
 import NotFound from './pages/NotFound';
 
 function App() {
@@ -21,13 +22,14 @@ function App() {
 
       <Route
         element={(
-          <PrivateRoute>
-            <Layout />
-          </PrivateRoute>
+          <ProtectedRoute>
+            <AppLayout />
+          </ProtectedRoute>
         )}
       >
         <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/history" element={<History />} />
+        <Route path="/upload" element={<Upload />} />
+        <Route path="/invoices" element={<Invoices />} />
         <Route path="/invoice/:id" element={<InvoiceDetail />} />
         <Route path="/profile" element={<Profile />} />
       </Route>
@@ -36,11 +38,11 @@ function App() {
         path="/admin"
         element={(
           <AdminRoute>
-            <Layout />
+            <AppLayout />
           </AdminRoute>
         )}
       >
-        <Route path="dashboard" element={<AdminDashboard />} />
+        <Route index element={<Admin />} />
       </Route>
 
       <Route path="*" element={<NotFound />} />

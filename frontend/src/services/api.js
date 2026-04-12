@@ -1,43 +1,62 @@
 import axios from 'axios';
+import { AUTH_TOKEN_KEY, AUTH_USER_KEY } from '../constants/authStorage';
 
-// Create axios instance
 const API = axios.create({
   baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api',
   timeout: 30000,
 });
 
-// Request interceptor to add auth token
+/** Called on 401 (e.g. expired/invalid JWT) so the app can clear auth + redirect without a full reload */
+let unauthorizedHandler = () => {};
+
+export function setUnauthorizedHandler(fn) {
+  unauthorizedHandler = typeof fn === 'function' ? fn : () => {};
+}
+
 API.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem(AUTH_TOKEN_KEY);
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
-// Response interceptor to handle errors
 API.interceptors.response.use(
-  (response) => {
-    // Backend responses use { success, message, data }.
-    // Return the inner payload when present so callers can use response.user/response.token.
-    return response.data?.data ?? response.data;
-  },
+  (response) => response.data?.data ?? response.data,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+    const status = error.response?.status;
+    const reqUrl = error.config?.url || '';
+    const skipGlobalUnauthorized =
+      reqUrl.includes('/auth/login') ||
+      reqUrl.includes('/auth/signup') ||
+      reqUrl.includes('/auth/logout');
+
+    if (status === 401 && !skipGlobalUnauthorized) {
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+      localStorage.removeItem(AUTH_USER_KEY);
+      try {
+        unauthorizedHandler();
+      } catch (e) {
+        console.error('Unauthorized handler error:', e);
+      }
     }
-    return Promise.reject(error.response?.data || error.message);
+
+    const data = error.response?.data;
+    const message =
+      (typeof data === 'object' && data && data.message) ||
+      error.message ||
+      'Request failed';
+
+    const err = new Error(message);
+    err.status = status;
+    if (typeof data === 'object' && data) err.details = data;
+    return Promise.reject(err);
   }
 );
 
-// Auth APIs
 export const authAPI = {
   signup: (userData) => API.post('/auth/signup', userData),
   login: (credentials) => API.post('/auth/login', credentials),
@@ -47,7 +66,6 @@ export const authAPI = {
   logout: () => API.post('/auth/logout'),
 };
 
-// Invoice APIs
 export const invoiceAPI = {
   upload: (formData) => {
     const config = {
@@ -64,7 +82,6 @@ export const invoiceAPI = {
   getAnalytics: (params = {}) => API.get('/invoice/analytics/my', { params }),
 };
 
-// Admin APIs
 export const adminAPI = {
   getUsers: (params = {}) => API.get('/admin/users', { params }),
   getInvoices: (params = {}) => API.get('/admin/invoices', { params }),
@@ -74,7 +91,6 @@ export const adminAPI = {
   getSystemHealth: () => API.get('/admin/health'),
 };
 
-// Health check
 export const healthAPI = {
   check: () => API.get('/health'),
 };
