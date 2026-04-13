@@ -7,7 +7,7 @@ import { X } from 'lucide-react';
 const titles = {
   '/dashboard': 'Dashboard',
   '/upload': 'Upload invoice',
-  '/invoices': 'Invoices',
+  '/invoices': 'My Invoices',
   '/profile': 'Profile',
   '/admin': 'Admin',
 };

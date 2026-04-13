@@ -31,12 +31,7 @@ const Login = () => {
     prevLoginLocationKeyRef.current !== undefined &&
     prevLoginLocationKeyRef.current !== location.key;
 
-  if (incomingRedirect) {
-    postLoginPathRef.current = incomingRedirect;
-  } else if (isNewHistoryEntry) {
-    postLoginPathRef.current = DEFAULT_AFTER_LOGIN;
-  }
-
+  postLoginPathRef.current = incomingRedirect || DEFAULT_AFTER_LOGIN;
   prevLoginLocationKeyRef.current = location.key;
 
   const getPostLoginPath = () => postLoginPathRef.current || DEFAULT_AFTER_LOGIN;

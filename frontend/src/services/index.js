@@ -4,4 +4,5 @@ export {
   invoiceAPI,
   adminAPI,
   healthAPI,
+  apiService,
 } from './api';

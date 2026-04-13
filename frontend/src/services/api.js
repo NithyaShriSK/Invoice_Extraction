@@ -96,3 +96,14 @@ export const healthAPI = {
 };
 
 export default API;
+
+export const apiService = {
+  // Auth
+  login: authAPI.login,
+  signup: authAPI.signup,
+
+  // Invoice
+  uploadInvoice: invoiceAPI.upload,
+  getInvoices: invoiceAPI.getMyInvoices,
+  saveInvoice: invoiceAPI.save,
+};

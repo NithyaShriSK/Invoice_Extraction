@@ -86,7 +86,7 @@ const InvoicesPage = () => {
         page: currentPage,
         limit: PAGE_SIZE,
       });
-      const list = response.invoices || [];
+      const list = response?.invoices || response?.data?.invoices || [];
       setInvoices(list);
       const pages = response.pagination?.pages ?? 1;
       const total = response.pagination?.total ?? list.length;

@@ -12,41 +12,46 @@ import InvoiceDetail from './pages/InvoiceDetail';
 import Profile from './pages/Profile';
 import Admin from './pages/Admin';
 import NotFound from './pages/NotFound';
+import { ToastProvider } from './components/common/ToastProvider';
 
 function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/dashboard" replace />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/signup" element={<Signup />} />
+    <>
+      <ToastProvider />   {/* ✅ ADD THIS LINE */}
 
-      <Route
-        element={(
-          <ProtectedRoute>
-            <AppLayout />
-          </ProtectedRoute>
-        )}
-      >
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/upload" element={<Upload />} />
-        <Route path="/invoices" element={<Invoices />} />
-        <Route path="/invoice/:id" element={<InvoiceDetail />} />
-        <Route path="/profile" element={<Profile />} />
-      </Route>
+      <Routes>
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
 
-      <Route
-        path="/admin"
-        element={(
-          <AdminRoute>
-            <AppLayout />
-          </AdminRoute>
-        )}
-      >
-        <Route index element={<Admin />} />
-      </Route>
+        <Route
+          element={(
+            <ProtectedRoute>
+              <AppLayout />
+            </ProtectedRoute>
+          )}
+        >
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/upload" element={<Upload />} />
+          <Route path="/invoices" element={<Invoices />} />
+          <Route path="/invoice/:id" element={<InvoiceDetail />} />
+          <Route path="/profile" element={<Profile />} />
+        </Route>
 
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+        <Route
+          path="/admin"
+          element={(
+            <AdminRoute>
+              <AppLayout />
+            </AdminRoute>
+          )}
+        >
+          <Route index element={<Admin />} />
+        </Route>
+
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </>
   );
 }
 

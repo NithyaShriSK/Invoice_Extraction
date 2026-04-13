@@ -13,7 +13,7 @@ import { cn } from '../../utils/cn';
 const mainNav = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/upload', label: 'Upload', icon: Upload, end: false },
-  { to: '/invoices', label: 'Invoices', icon: FileStack, end: false },
+  { to: '/invoices', label: 'My Invoices', icon: FileStack, end: false },
 ];
 
 const adminNav = [{ to: '/admin', label: 'Admin', icon: Shield, end: false }];
