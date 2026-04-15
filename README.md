@@ -86,7 +86,7 @@ invoice/
 
 2. **Set up Python Environment**
    ```bash
-   conda create -n ocr python=3.8
+   conda create -n ocr python=3.10
    conda activate ocr
    ```
 
