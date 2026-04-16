@@ -81,7 +81,100 @@ invoice/
 | **LLM** | Ollama (Qwen 2.5) |
 | **Password Hashing** | Passlib, bcrypt |
 
+<<<<<<< HEAD
 ## 📋 API Endpoints
+=======
+- Node.js (v14 or higher)
+- Python (v3.7 or higher)
+- MongoDB Atlas account
+- Conda environment (recommended)
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd invoice
+   ```
+
+2. **Set up Python Environment**
+   ```bash
+   conda create -n ocr python=3.10
+   conda activate ocr
+   ```
+
+3. **Install Python Dependencies**
+   ```bash
+   cd python
+   pip install -r requirements.txt
+   ```
+
+4. **Install Backend Dependencies**
+   ```bash
+   cd ../backend
+   npm install
+   ```
+
+5. **Install Frontend Dependencies**
+   ```bash
+   cd ../frontend
+   npm install
+   ```
+
+6. **Environment Setup**
+
+   **Backend (.env)**:
+   ```env
+   # MongoDB Configuration
+   MONGODB_URI=mongodb+srv://nithyashriskcs24_db_user:<password>@cluster0.tg9qtt0.mongodb.net/invoice_management
+   
+   # JWT Configuration
+   JWT_SECRET=your-super-secret-jwt-key
+   JWT_EXPIRE=7d
+   
+   # Server Configuration
+   PORT=5000
+   NODE_ENV=development
+   
+   # Email Configuration
+   EMAIL_HOST=smtp.gmail.com
+   EMAIL_PORT=587
+   EMAIL_USER=your-email@gmail.com
+   EMAIL_PASS=your-app-password
+   
+   # Python Scripts Path
+   PYTHON_PATH=python
+   DEEP_SCRIPT_PATH=../python/deep.py
+   LLM_CORRECT_SCRIPT_PATH=../python/llm_correct.py
+   ```
+
+   **Frontend (.env)**:
+   ```env
+   REACT_APP_API_URL=http://localhost:5000/api
+   REACT_APP_ENV=development
+   ```
+
+### Running the Application
+
+1. **Start the Backend Server**
+   ```bash
+   cd backend
+   npm run dev
+   ```
+
+2. **Start the Frontend Development Server**
+   ```bash
+   cd frontend
+   npm start
+   ```
+
+3. **Access the Application**
+   - Frontend: http://localhost:3000
+   - Backend API: http://localhost:5000
+   - API Health Check: http://localhost:5000/api/health
+
+## 📊 API Endpoints
+>>>>>>> 48ae5275ed715d7d4f9609e13ee9dcf1a1e25520
 
 ### Authentication
 - `POST /auth/register` - Register new user
