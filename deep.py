@@ -1,4 +1,4 @@
-﻿from transformers import AutoModel, AutoTokenizer
+from transformers import AutoModel, AutoTokenizer
 import torch
 import os
 import cv2
@@ -7,9 +7,21 @@ import json
 import re
 import io
 import sys
+import subprocess
 from collections import Counter
 import ollama
 from PIL import Image, ImageEnhance, ImageFilter
+import argparse
+
+
+def safe_terminal_print(text, end="\n"):
+    """Print text without crashing on terminals that cannot encode some Unicode chars."""
+    try:
+        print(text, end=end)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        safe_text = text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+        print(safe_text, end=end)
 
 
 def capture_model_infer(model, tokenizer, echo_output=True, **kwargs):
@@ -28,7 +40,7 @@ def capture_model_infer(model, tokenizer, echo_output=True, **kwargs):
     raw = buf.getvalue()
     # Re-display model output so the terminal still shows progress.
     if echo_output:
-        print(raw, end="")
+        safe_terminal_print(raw, end="")
     # OCR text appears after the last '=====================' separator
     parts = raw.split("=====================")
     ocr_part = parts[-1] if len(parts) > 1 else raw
@@ -49,7 +61,7 @@ def preprocess_image(image_path, output_path="preprocessed_image.png", scale_fac
     new_width = int(original_width * scale_factor)
     new_height = int(original_height * scale_factor)
     img_upscaled = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
-    print(f"✓ Image upscaled from {original_width}x{original_height} to {new_width}x{new_height}")
+    print(f"[OK] Image upscaled from {original_width}x{original_height} to {new_width}x{new_height}")
 
     # Convert to grayscale
     gray = cv2.cvtColor(img_upscaled, cv2.COLOR_BGR2GRAY)
@@ -103,7 +115,7 @@ def preprocess_image(image_path, output_path="preprocessed_image.png", scale_fac
 
     # Save preprocessed high-resolution grayscale image
     pil_img.save(output_path, quality=100, optimize=False)
-    print(f"✓ Preprocessed grayscale image saved to: {output_path}")
+    print(f"[OK] Preprocessed grayscale image saved to: {output_path}")
 
     return output_path
 
@@ -1035,12 +1047,65 @@ def normalize_export_date(value):
 
 def resolve_runtime_paths():
     """Allow running the pipeline against arbitrary images/output folders."""
-    if len(sys.argv) < 2:
-        raise ValueError("Input image path is required")
+    parser = argparse.ArgumentParser(description="Run OCR pipeline for an invoice image")
+    parser.add_argument("image_path", help="Path to the input invoice image")
+    parser.add_argument("output_dir", nargs="?", default="./output", help="Directory to store intermediate and final outputs")
+    parser.add_argument("--output-file", dest="output_file", default=None, help="Final JSON filename (example: invoice1_validated.json)")
+    parser.add_argument(
+        "--dynamic-output-name",
+        action="store_true",
+        help="Use <input_basename>_validated.json as final JSON filename"
+    )
+    parser.add_argument(
+        "--skip-llm-script",
+        action="store_true",
+        help="Skip external llm_correct.py handoff and use in-file correction only"
+    )
+    args = parser.parse_args()
 
-    image_path = sys.argv[1]
-    output_dir = sys.argv[2] if len(sys.argv) > 2 else "./output"
-    return image_path, output_dir
+    image_path = args.image_path
+    output_dir = args.output_dir
+
+    if args.output_file:
+        output_file = args.output_file
+    elif args.dynamic_output_name:
+        base_name = os.path.splitext(os.path.basename(image_path))[0]
+        output_file = f"{base_name}_validated.json"
+    else:
+        output_file = "validated_clean.json"
+
+    return image_path, output_dir, output_file, (not args.skip_llm_script)
+
+
+def run_external_llm_correct(output_dir, output_file):
+    """Run llm_correct.py against files in output_dir and return True on success."""
+    llm_script_path = os.path.join(os.path.dirname(__file__), "llm_correct.py")
+    if not os.path.exists(llm_script_path):
+        print(f"[WARNING] llm_correct.py not found at: {llm_script_path}")
+        return False
+
+    cmd = [sys.executable, llm_script_path, "--from-files", output_dir, output_file]
+    print(f"\n=== Running llm_correct.py ===\n{' '.join(cmd)}")
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.stdout:
+            print(result.stdout)
+        if result.returncode != 0:
+            if result.stderr:
+                print(result.stderr)
+            print(f"[WARNING] llm_correct.py failed with code {result.returncode}. Falling back to internal correction.")
+            return False
+
+        expected_json = os.path.join(output_dir, output_file)
+        if not os.path.exists(expected_json):
+            print(f"[WARNING] llm_correct.py completed but did not create {expected_json}. Falling back to internal correction.")
+            return False
+
+        print(f"[OK] External llm_correct.py created: {expected_json}")
+        return True
+    except Exception as e:
+        print(f"[WARNING] Could not run llm_correct.py: {e}. Falling back to internal correction.")
+        return False
 
 
 def prepare_export_json(data):
@@ -1897,7 +1962,9 @@ def validate_json_data(json_str):
 
 
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
+# Use allocator options that are supported on Windows and help reduce fragmentation.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "max_split_size_mb:128,garbage_collection_threshold:0.8")
 
 
 
@@ -1913,13 +1980,19 @@ model_name = "deepseek-ai/DeepSeek-OCR-2"
 
 
 
-tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+tokenizer = AutoTokenizer.from_pretrained(
+    model_name,
+    trust_remote_code=True,
+    use_fast=False
+)
 
 
 
 
 
 
+
+model_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
 
 model = AutoModel.from_pretrained(
 
@@ -1939,13 +2012,30 @@ model = AutoModel.from_pretrained(
 
 )
 
+print(f"=== DeepSeek OCR model loaded: {model_name} ===")
 
 
 
 
 
 
-model = model.eval().cuda().to(torch.bfloat16)
+
+# Use GPU if available, otherwise fall back to CPU.
+if torch.cuda.is_available():
+    cuda_device = torch.device("cuda:0")
+    model = model.eval().to(cuda_device).to(model_dtype)
+    print(f"=== Running on GPU: {cuda_device} with {str(model_dtype).replace('torch.', 'torch.')} ===")
+else:
+    print("[WARNING] CUDA not available, using CPU (slower)")
+    model = model.eval().to(torch.float32)
+    print("=== Running on CPU with torch.float32 ===")
+
+low_vram_mode = False
+if torch.cuda.is_available():
+    total_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+    low_vram_mode = total_gb <= 8.5
+    if low_vram_mode:
+        print(f"=== Low VRAM mode enabled ({total_gb:.2f} GB GPU): smaller OCR passes ===")
 
 
 
@@ -1957,7 +2047,7 @@ prompt = "<image>\n<|grounding|>Extract all text from this document."
 
 
 
-image_file, output_path = resolve_runtime_paths()
+image_file, output_path, final_output_file, use_external_llm_script = resolve_runtime_paths()
 
 
 
@@ -1978,10 +2068,12 @@ os.makedirs(output_path, exist_ok=True)
 
 
 print("=== Starting Image Preprocessing ===")
+print(f"[Preprocess] Input image: {image_file}")
 
 
 
-# Scale factor 3.0 triples the resolution for maximum character accuracy
+# Scale factor 3.0 triples the resolution for maximum character accuracy.
+scale_factor = 3.0
 
 
 
@@ -1997,7 +2089,7 @@ preprocessed_image = preprocess_image(
 
 
 
-    scale_factor=3.0
+    scale_factor=scale_factor
 
 
 
@@ -2023,6 +2115,9 @@ print("=== Starting Smart Slice OCR ===")
 global_txt_path = os.path.join(output_path, "global.txt")
 global_ocr_path = os.path.join(output_path, "global_ocr.txt")
 
+if torch.cuda.is_available():
+    torch.cuda.empty_cache()
+
 global_text_raw = capture_model_infer(
 
     model, tokenizer,
@@ -2035,6 +2130,7 @@ global_text_raw = capture_model_infer(
 
     output_path=output_path,
 
+    # Keep global pass at known-good resolution; 640 can trigger model internals bug.
     base_size=768,
 
     image_size=768,
@@ -2046,6 +2142,9 @@ global_text_raw = capture_model_infer(
 )
 
 global_text = normalize_ocr_text(clean_deepseek_output(global_text_raw))
+
+print(f"[Global OCR] Extracted {len(global_text)} characters")
+safe_terminal_print(f"[Global OCR Preview]\n{global_text[:500] if global_text else '[EMPTY]'}\n")
 
 with open(global_txt_path, "w", encoding="utf-8") as f:
     f.write(global_text)
@@ -2072,12 +2171,16 @@ with open(ocr_storage_path, "w", encoding="utf-8") as f:
     for i, crop in enumerate(crops):
 
         print(f"\n--- Processing slice: {i + 1}/{len(crops)} ---")
+        safe_terminal_print(f"[Slice {i}] Saving crop and running OCR")
 
         temp_slice_path = os.path.join(output_path, f"slice_{i}.png")
 
         cv2.imwrite(temp_slice_path, crop)
 
 
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         res = capture_model_infer(
 
@@ -2089,6 +2192,7 @@ with open(ocr_storage_path, "w", encoding="utf-8") as f:
 
             output_path=output_path,
 
+            # Keep slice infer sizes on known-good values to avoid custom-model edge bugs.
             base_size=1024,
 
             image_size=768,
@@ -2114,7 +2218,10 @@ with open(ocr_storage_path, "w", encoding="utf-8") as f:
 
             ocr_outputs.append(clean_res)
 
-            print(f"  ✓ Slice {i} saved to text file.")
+            print(f"  [OK] Slice {i} saved to text file.")
+            safe_terminal_print(f"[Slice {i} OCR Preview]\n{clean_res[:500]}\n")
+        else:
+            safe_terminal_print(f"[Slice {i}] OCR result empty or too short")
 
 
 
@@ -2141,11 +2248,15 @@ if state_code_hint:
 
 print("\n=== OCR RESULT (8-Slice Combined) ===\n")
 
-if os.path.exists(ocr_storage_path):
+external_llm_completed = False
+if os.path.exists(ocr_storage_path) and use_external_llm_script:
+    external_llm_completed = run_external_llm_correct(output_path, final_output_file)
+
+if os.path.exists(ocr_storage_path) and not external_llm_completed:
 
     with open(ocr_storage_path, "r", encoding="utf-8") as f:
 
-        print(f.read())
+        safe_terminal_print(f.read())
 
 if voted_gst:
 
@@ -2293,7 +2404,7 @@ if os.path.exists(ocr_storage_path):
 
         export_data = prepare_export_json(final_data)
 
-        export_json_path = os.path.join(output_path, "validated_clean.json")
+        export_json_path = os.path.join(output_path, final_output_file)
 
         with open(export_json_path, "w", encoding="utf-8") as f:
 
@@ -2320,3 +2431,13 @@ else:
 
 
     print("LLM Correction skipped: OCR text file not found")
+
+# Always show the final JSON file content from output folder if it exists.
+validated_json_path = os.path.join(output_path, final_output_file)
+if os.path.exists(validated_json_path):
+    print(f"\n=== FINAL JSON FILE CONTENT ({validated_json_path}) ===\n")
+    try:
+        with open(validated_json_path, "r", encoding="utf-8") as f:
+            print(f.read())
+    except Exception as e:
+        print(f"Could not read final JSON file: {e}")

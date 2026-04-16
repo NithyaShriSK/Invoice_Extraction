@@ -1,24 +1,33 @@
-FROM node:20-bookworm
+FROM python:3.10-slim
 
-WORKDIR /app/backend
+WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-pip python3-venv libgl1 libglib2.0-0 \
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
-ENV VIRTUAL_ENV=/opt/venv
-RUN python3 -m venv $VIRTUAL_ENV
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+# Copy requirements
+COPY requirements.txt .
 
-COPY backend/package*.json ./
-RUN npm install
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY python/requirements.txt /app/python/requirements.txt
-RUN pip install --no-cache-dir --only-binary :all: --default-timeout=1000 --retries 10 -r /app/python/requirements.txt
+# Copy application
+COPY . .
 
-COPY backend /app/backend
-COPY python /app/python
+# Create necessary directories
+RUN mkdir -p uploads output scripts
 
-EXPOSE 5000
+# Expose port
+EXPOSE 8000
 
-CMD ["npm", "run", "dev"]
+# Run application
+CMD ["python", "run.py"]
