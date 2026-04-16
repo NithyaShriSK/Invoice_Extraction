@@ -1,0 +1,78 @@
+[WARNING] CUDA not available, using CPU (slower)
+=== Starting Image Preprocessing ===
+[OK] Image upscaled from 590x706 to 1770x2118
+[OK] Preprocessed grayscale image saved to: ./output\preprocessed_tmph7m0lvgv.png
+=== Preprocessing Complete ===
+
+=== Starting Smart Slice OCR ===
+=== Global OCR saved to: ./output\global.txt ===
+
+--- Processing slice: 1/4 ---
+=====================
+BASE:  torch.Size([1, 256, 1280])
+PATCHES:  torch.Size([3, 144, 1280])
+=====================
+<|ref|>NAGANNA RAAJAA SILK INDUSTRIES
+
+15/4A.Radio Room Backside,Thottathusalai,Doddampalayam-638451
+
+Bhavanisagar Via,Sathyamangalam Tk.-638 451,Er0de Dist.
+
+Cell:9629588189,9791769734
+
+GSTIN:33DCRPK0145Q1Z5
+
+TAXINVOICE
+
+STATE CODE:33
+
+To.
+
+VAYITHAS
+
+CREATIONS
+
+Invoice No.
+
+153
+
+ANTHIYUR
+
+638153
+
+Invoice Date
+
+24n12.024
+
+E-way Bill No.
+
+Transportation Mode
+
+Hand Delive
+  [OK] Slice 0 saved to text file.
+
+--- Processing slice: 2/4 ---
+=====================
+BASE:  torch.Size([1, 256, 1280])
+PATCHES:  torch.Size([6, 144, 1280])
+=====================
+E-way Bill No.
+
+Transportation Mode
+
+Hand Delivery
+
+S.No.
+
+Name of Product
+
+HSN Code
+
+Qty
+
+Rate
+
+Amount
+  [OK] Slice 1 saved to text file.
+
+--- Processing slice: 3/4 ---

@@ -1,22 +1,22 @@
 {
   "Seller_Name": "NAGANNA RAAJAA SILK INDUSTRIES",
-  "Seller_GSTIN": "33DCRPK0145Q1ZS",
-  "Buyer_Name": "KAVITHAS CREATIONS",
+  "Seller_GSTIN": "33DCRPK0145Q1Z5",
+  "Buyer_Name": "VAYITHAS CREATIONS",
   "Buyer_GSTIN": "33EAZPK0819F1ZP",
-  "Invoice_No": "154",
-  "Invoice_Date": "27/11/2024",
+  "Invoice_No": "153",
+  "Invoice_Date": "02/11/2024",
   "Products": [
     {
       "S_No": "1",
-      "Name_of_Product": "Raut Silk",
-      "HSN_Code": "6002",
-      "Qty": "10.6",
-      "Rate": "5500",
+      "Name_of_Product": "Raw Silk",
+      "HSN_Code": "5002",
+      "Qty": "6.3326",
+      "Rate": "5460",
       "CGST_Percent": "",
       "SGST_Percent": "",
       "IGST_Percent": "",
-      "Amount": "59,047"
+      "Amount": "34512"
     }
   ],
-  "Grand_Total": "590971"
+  "Grand_Total": "34512"
 }

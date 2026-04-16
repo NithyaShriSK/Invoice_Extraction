@@ -1,13 +1,24 @@
 import json
 import re
 import os
+import sys
 import ollama
 
-SLICED_TXT = os.path.join("output", "sliced.txt")
-GLOBAL_TXT = os.path.join("output", "global_ocr.txt")
-GLOBAL_TXT_ALIAS = os.path.join("output", "global.txt")
-LLM_CORRECT_TXT = os.path.join("output", "llm_correct.txt")
-OUTPUT_JSON = os.path.join("output", "corrected.json")
+DEFAULT_OUTPUT_DIR = "output"
+DEFAULT_VALIDATED_JSON = "validated_clean.json"
+
+
+def configure_paths(output_dir=DEFAULT_OUTPUT_DIR, validated_json_name=DEFAULT_VALIDATED_JSON):
+    global SLICED_TXT, GLOBAL_TXT, GLOBAL_TXT_ALIAS, LLM_CORRECT_TXT, OUTPUT_JSON, VALIDATED_JSON
+    SLICED_TXT = os.path.join(output_dir, "sliced.txt")
+    GLOBAL_TXT = os.path.join(output_dir, "global_ocr.txt")
+    GLOBAL_TXT_ALIAS = os.path.join(output_dir, "global.txt")
+    LLM_CORRECT_TXT = os.path.join(output_dir, "llm_correct.txt")
+    OUTPUT_JSON = os.path.join(output_dir, "corrected.json")
+    VALIDATED_JSON = os.path.join(output_dir, validated_json_name)
+
+
+configure_paths()
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -60,6 +71,137 @@ def format_amount_for_export(value):
     if float(parsed).is_integer():
         return f"{int(parsed):,}"
     return f"{parsed:,.2f}"
+
+
+_ONES = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"]
+_TEENS = ["Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"]
+_TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"]
+
+
+def number_to_words(n: int) -> str:
+    """Convert an integer amount to English words (Indian currency style is handled by caller)."""
+    if n == 0:
+        return "Zero"
+
+    def under_thousand(num: int) -> str:
+        parts = []
+        hundreds, rem = divmod(num, 100)
+        if hundreds:
+            parts.append(f"{_ONES[hundreds]} Hundred")
+        if rem:
+            if rem < 10:
+                parts.append(_ONES[rem])
+            elif rem < 20:
+                parts.append(_TEENS[rem - 10])
+            else:
+                tens, ones = divmod(rem, 10)
+                if ones:
+                    parts.append(f"{_TENS[tens]} {_ONES[ones]}")
+                else:
+                    parts.append(_TENS[tens])
+        return " ".join(parts).strip()
+
+    units = [(10000000, "Crore"), (100000, "Lakh"), (1000, "Thousand")]
+    parts = []
+    remaining = n
+    for divisor, label in units:
+        chunk, remaining = divmod(remaining, divisor)
+        if chunk:
+            parts.append(f"{number_to_words(chunk)} {label}")
+
+    if remaining:
+        parts.append(under_thousand(remaining))
+
+    return " ".join(parts).strip()
+
+
+def amount_to_rupees_words(value) -> str:
+    parsed = parse_numeric_value(value)
+    if parsed is None:
+        return ""
+    integer_part = int(round(parsed))
+    return f"{number_to_words(integer_part)} Rupees Only".replace("  ", " ").strip()
+
+
+def extract_bank_details(data: dict) -> dict:
+    seller_bank = data.get("Bank_Details") or data.get("BankInfo") or data.get("Seller", {}).get("BankDetails") or {}
+    if not isinstance(seller_bank, dict):
+        seller_bank = {}
+
+    bank_name = seller_bank.get("BankName") or seller_bank.get("Bank_Name") or seller_bank.get("Bank") or ""
+    return {
+        "Bank_Name": bank_name,
+        "Account_Name": seller_bank.get("AccountName") or seller_bank.get("A/c_Name") or seller_bank.get("Account_Name") or data.get("Seller_Name") or data.get("Seller") or "",
+        "Account_Number": seller_bank.get("AccountNumber") or seller_bank.get("A/c_No") or seller_bank.get("Account_No") or "",
+        "IFSC": seller_bank.get("IFSC") or seller_bank.get("IFSCCode") or "",
+        "Branch": seller_bank.get("Branch") or ""
+    }
+
+
+def extract_tax_details(data: dict) -> dict:
+    tax = data.get("TaxDetails") if isinstance(data.get("TaxDetails"), dict) else {}
+    if not isinstance(tax, dict):
+        tax = {}
+    return {
+        "CGST": tax.get("CGST") or data.get("CGST") or "",
+        "SGST": tax.get("SGST") or data.get("SGST") or "",
+        "IGST": tax.get("IGST") or data.get("IGST") or ""
+    }
+
+
+def normalize_product_rows(data: dict) -> list:
+    """Return a normalized list of product dictionaries from all supported OCR shapes."""
+    source_rows = (
+        data.get("Products")
+        or data.get("Product_Details")
+        or data.get("Table_Rows")
+        or data.get("TableRows")
+        or []
+    )
+
+    normalized = []
+    for index, item in enumerate(source_rows, start=1):
+        if not isinstance(item, dict):
+            continue
+
+        raw_s_no = str(item.get("S_No") or item.get("SNo") or item.get("S_No.") or "").strip()
+        raw_name = str(item.get("Name_of_Product") or item.get("ProductName") or item.get("Name") or item.get("Item") or item.get("Description") or "").strip()
+        upper_s_no = raw_s_no.upper()
+        upper_name = raw_name.upper()
+
+        # Skip summary/total rows entirely.
+        if any(token in upper_s_no for token in ("TOTAL", "GRAND TOTAL", "SUB TOTAL")):
+            continue
+        if any(token in upper_name for token in ("TOTAL", "GRAND TOTAL", "SUB TOTAL")):
+            continue
+
+        serial_no = item.get("S_No") or item.get("SNo") or item.get("S_No.") or index
+        product_name = raw_name
+
+        # If OCR placed the product name in S_No and the second field is only a fragment,
+        # prefer the richer text from S_No and use a numeric serial instead.
+        if raw_s_no and not raw_s_no.isdigit():
+            if not product_name or len(raw_s_no) > len(product_name) or product_name in raw_s_no:
+                product_name = raw_s_no
+                serial_no = index
+
+        # Avoid blank or duplicate product names.
+        if product_name and raw_s_no and product_name == raw_s_no:
+            serial_no = index
+
+        normalized.append({
+            "S_No": serial_no,
+            "Name_of_Product": product_name,
+            "HSN_Code": item.get("HSN_Code") or item.get("HSNCode") or item.get("HSN") or "",
+            "Qty": item.get("Qty") or item.get("Quantity") or item.get("QTY") or "",
+            "Rate": item.get("Rate") or item.get("MRP") or item.get("Price") or "",
+            "CGST_Percent": item.get("CGST_Percent") or item.get("CGST_Rate") or item.get("CGST") or "",
+            "SGST_Percent": item.get("SGST_Percent") or item.get("SGST_Rate") or item.get("SGST") or "",
+            "IGST_Percent": item.get("IGST_Percent") or item.get("IGST_Rate") or item.get("IGST") or "",
+            "Amount": item.get("Amount") or item.get("Total") or item.get("Line_Total") or ""
+        })
+
+    return normalized
 
 
 def normalize_numeric_ocr_field(value, keep_decimal=True):
@@ -302,7 +444,7 @@ def fix_gstins_in_data(data: dict) -> dict:
             continue
         corrected = correct_gstin_python(raw, force_state_code='33')
         if corrected != raw:
-            print(f"  [GSTIN FIX] {key}: '{raw}' → '{corrected}'")
+            print(f"  [GSTIN FIX] {key}: '{raw}' -> '{corrected}'")
             data[f"{key}_OCR_Raw"] = raw
             data[key] = corrected
         result = validate_gstin(corrected)
@@ -311,6 +453,96 @@ def fix_gstins_in_data(data: dict) -> dict:
             print(f"  [GSTIN WARNING] {key} still has issues: {'; '.join(result['issues'])}")
         else:
             print(f"  [GSTIN OK] {key}: {corrected}")
+    return data
+
+
+def extract_all_gstin_candidates(text: str) -> list:
+    """Extract 15-char GST-like candidates from OCR text."""
+    if not text:
+        return []
+
+    normalized = re.sub(r'[^A-Z0-9\n ]', ' ', str(text).upper())
+    joined = normalized.replace(' ', '')
+
+    candidates = []
+    # Strict 15-char alphanumeric windows are enough for OCR GSTIN recovery.
+    for i in range(0, max(0, len(joined) - 14)):
+        token = joined[i:i + 15]
+        if re.fullmatch(r'[A-Z0-9]{15}', token):
+            candidates.append(token)
+
+    # Keep order while removing duplicates.
+    seen = set()
+    unique = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            unique.append(c)
+    return unique
+
+
+def _prefer_buyer_gstin_from_lines(text: str) -> str:
+    """Prefer GSTIN near buyer/bill-to sections before generic candidates."""
+    if not text:
+        return ""
+
+    lines = [ln.strip() for ln in str(text).splitlines() if ln.strip()]
+    scored = []
+
+    for idx, line in enumerate(lines):
+        upper = line.upper()
+        context = " ".join(lines[max(0, idx - 2): min(len(lines), idx + 3)]).upper()
+        line_candidates = extract_all_gstin_candidates(line)
+        if not line_candidates:
+            line_candidates = extract_all_gstin_candidates(context)
+
+        if not line_candidates:
+            continue
+
+        score = 0
+        if 'BUYER' in context or 'BILL TO' in context or 'SHIP TO' in context:
+            score += 4
+        if 'SELLER' in context or 'SUPPLIER' in context:
+            score -= 2
+        if 'GST' in upper or 'GSTIN' in upper:
+            score += 2
+
+        for cand in line_candidates:
+            scored.append((score, cand))
+
+    if scored:
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return scored[0][1]
+
+    # Fallback: first generic candidate from full text
+    generic = extract_all_gstin_candidates(text)
+    return generic[0] if generic else ""
+
+
+def ensure_buyer_gstin(data: dict, sliced_text: str, global_text: str) -> dict:
+    """Guarantee Buyer_GSTIN is populated and repaired from OCR context."""
+    current = str(data.get('Buyer_GSTIN', '')).strip().upper()
+
+    # If already valid, keep as-is.
+    if current and validate_gstin(current)['valid']:
+        return data
+
+    ocr_pool = "\n".join([sliced_text or "", global_text or ""])
+    candidate = _prefer_buyer_gstin_from_lines(ocr_pool)
+    if not candidate:
+        return data
+
+    corrected = correct_gstin_python(candidate)
+    # If we still have a value from LLM, keep OCR raw trace.
+    if current and current != corrected:
+        data['Buyer_GSTIN_OCR_Raw'] = current
+    data['Buyer_GSTIN'] = corrected
+
+    check = validate_gstin(corrected)
+    if not check['valid']:
+        data['Buyer_GSTIN_ValidationWarning'] = '; '.join(check['issues'])
+    elif 'Buyer_GSTIN_ValidationWarning' in data:
+        del data['Buyer_GSTIN_ValidationWarning']
     return data
 
 
@@ -362,13 +594,25 @@ def missing_fields(data: dict) -> list:
 
 
 def call_llm(prompt_text: str, system: str) -> str:
-    response = ollama.generate(
-        model='qwen2.5:7b',
-        system=system,
-        prompt=prompt_text,
-        format='json',
-        options={'temperature': 0}
-    )
+    host = os.environ.get('OLLAMA_HOST', 'http://127.0.0.1:11434')
+    try:
+        response = ollama.generate(
+            model='qwen2.5:7b',
+            system=system,
+            prompt=prompt_text,
+            format='json',
+            options={'temperature': 0}
+        )
+    except Exception:
+        # Retry via explicit client host for envs where default host is not picked up.
+        client = ollama.Client(host=host)
+        response = client.generate(
+            model='qwen2.5:7b',
+            system=system,
+            prompt=prompt_text,
+            format='json',
+            options={'temperature': 0}
+        )
     return response['response']
 
 
@@ -523,26 +767,20 @@ def main():
 
     print("\n=== GSTIN VALIDATION ===")
     data = fix_gstins_in_data(data)
+    data = ensure_buyer_gstin(data, sliced_content, global_content)
+    if data.get('Buyer_GSTIN'):
+        print(f"  [BUYER GSTIN FINAL] {data.get('Buyer_GSTIN')}")
 
     # 1. Apply the fixes
     data = final_data_repair(data)
 
     # 2. Force the final structure for Export
-    normalized_products = []
-    for item in data.get("Products", []):
-        if not isinstance(item, dict):
-            continue
-        normalized_products.append({
-            "S_No": item.get("S_No", ""),
-            "Name_of_Product": item.get("Name_of_Product") or item.get("ProductName") or "",
-            "HSN_Code": item.get("HSN_Code", ""),
-            "Qty": item.get("Qty") or item.get("Quantity") or "",
-            "Rate": item.get("Rate", ""),
-            "CGST_Percent": item.get("CGST_Percent") or item.get("CGST_Rate") or "",
-            "SGST_Percent": item.get("SGST_Percent") or item.get("SGST_Rate") or "",
-            "IGST_Percent": item.get("IGST_Percent") or item.get("IGST_Rate") or "",
-            "Amount": item.get("Amount", "")
-        })
+    normalized_products = normalize_product_rows(data)
+
+    grand_total_value = data.get("Grand_Total") or data.get("Amount") or ""
+    grand_total_words = amount_to_rupees_words(grand_total_value)
+    bank_details = extract_bank_details(data)
+    tax_details = extract_tax_details(data)
 
     final_json = {
         "Seller_Name": data.get("Seller_Name") or data.get("Seller") or "",
@@ -551,8 +789,13 @@ def main():
         "Buyer_GSTIN": data.get("Buyer_GSTIN") or "",
         "Invoice_No": clean_invoice_number(data.get("Invoice_No")),
         "Invoice_Date": normalize_export_date(data.get("Invoice_Date")),
-        "Products": normalized_products,
-        "Grand_Total": normalize_numeric_ocr_field(data.get("Grand_Total") or data.get("Amount") or "")
+        "Bank_Details": bank_details,
+        "Product_Details": normalized_products,
+        "CGST": tax_details["CGST"],
+        "SGST": tax_details["SGST"],
+        "IGST": tax_details["IGST"],
+        "Grand_Total": normalize_numeric_ocr_field(grand_total_value),
+        "Grand_Total_In_Words": grand_total_words
     }
 
     print("\n=== FINAL EXPORTED JSON ===")
@@ -560,10 +803,32 @@ def main():
     print(pretty)
 
     # Save to validated_clean.json
-    output_path = os.path.join("output", "validated_clean.json")
-    with open(output_path, "w", encoding="utf-8") as f:
+    with open(VALIDATED_JSON, "w", encoding="utf-8") as f:
         f.write(pretty)
+    print(f"\nSaved validated JSON to: {VALIDATED_JSON}")
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--from-files":
+        cli_output_dir = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_OUTPUT_DIR
+        cli_output_name = sys.argv[3] if len(sys.argv) > 3 else DEFAULT_VALIDATED_JSON
+        configure_paths(cli_output_dir, cli_output_name)
+        main()
+        sys.exit(0)
+
+    if len(sys.argv) > 1:
+        # Backend may spawn: python llm_correct.py "<raw ocr text>"
+        argv_system = (
+            "You are an expert Invoice Parser.\n"
+            "RULES:\n"
+            "1. FIELD PRESERVATION: Copy Qty, Rate, Amount, and Grand_Total from OCR. Do NOT derive Amount from Qty * Rate.\n"
+            "2. GST: Copy GSTIN strings exactly as in OCR.\n"
+            "3. Extract Seller_Name, Buyer_Name, Seller_GSTIN, Buyer_GSTIN, Invoice_No, Invoice_Date, Products, Grand_Total.\n"
+            "RETURN ONLY JSON."
+        )
+        try:
+            print(call_llm(f"PROCESS THIS INVOICE OCR TEXT:\n{sys.argv[1]}", argv_system))
+        except Exception as e:
+            print(json.dumps({"error": str(e)}))
+        sys.exit(0)
     main()

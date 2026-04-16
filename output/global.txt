@@ -1,46 +1,42 @@
-NAGANNA RAAJAA SILK INDUSTRIES
+NAGANNARAAJAASILKINDUSTRIES
 
-154/A,Radio Room Backside,Thottalurattai, Doddampattayam-634541
+15/4A,Radio Room Backside,Thoothathalai,Doeddapalmay@834651
 
-Bhavanagariva, Vai, Sathyamangalam Tk., 638 451, Errode Dist.
+BhuvanisegarVai,SathyanangalamTk.638451,Er0deDist.
 
-Cell:96295 68189,9791769734
+Cell:9629586189,9791769734
 
-GSTIN:33CDRCPK014501285
+GSTIN:33DCRPKO145Q1ZS
 
 TAXINVOICE
 
-STATE CODE:33
+STATECODE:33
 
-To.
+To
 
-KAVITHAS
+YATHTHA
 
-CREATIONS
+InvoiceNo
 
-Invoice No.
+153
 
-154
+AMTHAYU
 
-ANTHYRO
+538153
 
-D36153
+InvoiceDate
 
-Invoice Date
+2/11/2024
 
-:27.11.2024
+E-wayBilNo.
 
-E-way Bill No.
+TransportationMode:Hand Delivery
 
-Transportation Mode:
+GSTIN:33E42PK0818FLF1
 
-GSTIN
+VehicleNo.
 
-E2PK0815F12
-
-Vehicle No.
-
-S.No.
+S.No
 
 Name of Product
 
@@ -52,73 +48,73 @@ Rate
 
 Amount
 
-Raut
+Reu
 
-stik
+Silk
 
-GSOA
+5002
 
-ID-1B-1B
+5332
 
-G550
+5460
 
-59,047
+34,512
 
-E&OE
+*E8OE
 
-*Hanlcom Goods only
+*Hanlom Goods only
 
 TOTAL
 
-Sq.047
+34,512
 
-Others
+RuppesThity
 
-Rupees
+GOLD
 
-Fifty
+THOUSAND
 
-Nim
+HUNDRED
 
-Thottai
+TWELVE
 
-Nimly
-
-Hail
-
-Savel
-
-Rupees Only
+RupeesOnly
 
 CGST@
 
 %
 
-BANK DETAIL:
+BANKDETAILS:
 
-SGST@
+SGSIT@
 
 %
 
-A/c Name
+BANK
 
-NAGANNA RAAJAA SILK INDUSTRIES
+ANNA RAAJA SILKINDUSTRIES
 
 IGST@
 
 %
 
-A/c No
+AcNo
 
 120026402797
 
-Tax Amount GST
+IGST@
+
+%
+
+Bank
+
+CANARA BANKLTD.
+
+TaxAmountGST
 
 IFSC
 
-CNR00004377
-
-CNR00004377
+CNR80004377
 
 Branch
 
@@ -126,10 +122,14 @@ SATHYAMANGALAM
 
 GRAND TOTAL
 
-Sq.047
+34,512
 
-Terms &Conditions:
+Terms&Conditions:
 
-For NAGANNA RAAJAA SILK INDUSTRIES
+ForNAGANNARAAJAASILKINDUSTRIES
 
-K.4.6.6.6.6.6.6.6.6.6.6.
+Party Signatory
+
+Authorised Signatory
+
+Party Signatory
